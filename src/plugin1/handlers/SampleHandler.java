@@ -1,7 +1,13 @@
 package plugin1.handlers;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.core.commands.AbstractHandler;
 import org.eclipse.core.commands.ExecutionEvent;
@@ -11,7 +17,9 @@ import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.IWorkspaceRoot;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.CoreException;
 import org.eclipse.jdt.core.ICompilationUnit;
+import org.eclipse.jdt.core.IJavaElement;
 import org.eclipse.jdt.core.IJavaProject;
 import org.eclipse.jdt.core.IPackageFragment;
 import org.eclipse.jdt.core.IPackageFragmentRoot;
@@ -29,6 +37,10 @@ import org.eclipse.jdt.core.dom.FieldDeclaration;
 import org.eclipse.jdt.core.dom.PrimitiveType;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 import org.eclipse.jdt.core.formatter.CodeFormatter;
+import org.eclipse.jdt.core.search.IJavaSearchConstants;
+import org.eclipse.jdt.core.search.IJavaSearchScope;
+import org.eclipse.jdt.core.search.SearchEngine;
+import org.eclipse.jdt.internal.ui.dialogs.FilteredTypesSelectionDialog;
 import org.eclipse.jdt.ui.JavaUI;
 import org.eclipse.text.edits.TextEdit;
 import org.eclipse.ui.IWorkbenchWindow;
@@ -43,6 +55,12 @@ import org.eclipse.ui.handlers.HandlerUtil;
  * @see org.eclipse.core.commands.AbstractHandler
  */
 public class SampleHandler extends AbstractHandler {
+	public enum Type {
+		INT, FLOAT, LONG, DOUBLE, CHAR, STRING, BOOLEAN
+	};
+
+	Map<String, Type> assignableFields = new HashMap<String, SampleHandler.Type>();
+
 	/**
 	 * The constructor.
 	 */
@@ -66,19 +84,37 @@ public class SampleHandler extends AbstractHandler {
 
 		IWorkspace workspace = ResourcesPlugin.getWorkspace();
 		IWorkspaceRoot root = workspace.getRoot();
-		FilteredItemsSelectionDialog dialog = new FilteredResourcesSelectionDialog(
-				window.getShell(), true, root, IResource.FILE);
+
+		IProject[] projects = root.getProjects();
+		List<IJavaProject> javaProjects = new ArrayList<IJavaProject>();
+		// Loop over all projects
+		for (IProject project : projects) {
+			try {
+				if (project.isNatureEnabled("org.eclipse.jdt.core.javanature")) {
+
+					IJavaProject javaProject = JavaCore.create(project);
+					javaProjects.add(javaProject);
+				}
+			} catch (CoreException e) {
+				e.printStackTrace();
+			}
+		}
+		IJavaProject[] array = javaProjects.toArray(new IJavaProject[] {});
+		// IJavaElement[] elements=new IJavaElement[]{Collections};;
+		IJavaSearchScope scope = SearchEngine.createJavaSearchScope(array);
+		FilteredTypesSelectionDialog dialog = new FilteredTypesSelectionDialog(
+				window.getShell(), true, null, scope, IJavaSearchConstants.TYPE);
+		// FilteredItemsSelectionDialog dialog = new
+		// FilteredTypesSelectionDialog(
+		// window.getShell(), true, root, IResource.FILE);
 		dialog.setTitle("Select Model Class");
 		dialog.setInitialPattern("?");
 		int open = dialog.open();
 
 		Object[] selectedFiles = dialog.getResult();
-		
-		
-		
-		
+
 		for (Object file : selectedFiles) {
-			generateBuilder((org.eclipse.core.internal.resources.File) file);
+			generateBuilder((org.eclipse.jdt.internal.core.SourceType) file);
 		}
 		// org.eclipse.core.internal.resources.File selectedFile =
 		// (org.eclipse.core.internal.resources.File) result[0];
@@ -89,19 +125,20 @@ public class SampleHandler extends AbstractHandler {
 	}
 
 	private void generateBuilder(
-			org.eclipse.core.internal.resources.File selectedFile) {
-		IProject project = selectedFile.getProject();
+			org.eclipse.jdt.internal.core.SourceType selectedFile) {
+		// IProject project = selectedFile.getJavaProject()
 
-		IJavaProject javaProject = JavaCore.create(project);
+		IJavaProject javaProject = selectedFile.getJavaProject();
 
-		String pathOfSelectedFile = selectedFile.getParent()
-				.getProjectRelativePath().toString();
+		String pathOfSelectedFile = selectedFile.getParent().getPath()
+				.removeLastSegments(1).toString();
+		// .getProjectRelativePath().toString();
 		IPackageFragmentRoot packageFragmentRoot = null;
 		try {
 			for (IPackageFragmentRoot packageRoot : javaProject
 					.getPackageFragmentRoots()) {
 				if (pathOfSelectedFile.startsWith(packageRoot.getPath()
-						.removeFirstSegments(1).toString())) {
+						.toString())) {
 					packageFragmentRoot = packageRoot;
 					break;
 				}
@@ -109,9 +146,8 @@ public class SampleHandler extends AbstractHandler {
 		} catch (JavaModelException e2) {
 			e2.printStackTrace();
 		}
-		String fullPackage = pathOfSelectedFile
-				.replaceFirst(packageFragmentRoot.getPath()
-						.removeFirstSegments(1).toString(), "");
+		String fullPackage = pathOfSelectedFile.replaceFirst(
+				packageFragmentRoot.getPath().toString(), "");
 		// remove first / and replace / with .
 		if (fullPackage.length() > 0) {
 			fullPackage = fullPackage.substring(1);
@@ -120,8 +156,8 @@ public class SampleHandler extends AbstractHandler {
 		IPackageFragment packageFragment = packageFragmentRoot
 				.getPackageFragment(fullPackage);
 
-		String name = selectedFile.getName();
-		String nameWithoutExtension = name.substring(0, name.indexOf("."));
+		// String name = selectedFile.getTypeQualifiedName();
+		String nameWithoutExtension = selectedFile.getTypeQualifiedName();
 		String builderClass = nameWithoutExtension + "Builder";
 		String builderFile = builderClass + ".java";
 
@@ -146,7 +182,8 @@ public class SampleHandler extends AbstractHandler {
 		} catch (JavaModelException e2) {
 			e2.printStackTrace();
 		}
-		ICompilationUnit cu = packageFragment.getCompilationUnit(name);
+		ICompilationUnit cu = packageFragment
+				.getCompilationUnit(nameWithoutExtension + ".java");
 		IType modelClassType = cu.getType(nameWithoutExtension);
 
 		ASTParser parser = ASTParser.newParser(AST.JLS3);
@@ -184,22 +221,43 @@ public class SampleHandler extends AbstractHandler {
 								String classToImport = importArray[1]
 										.substring(0,
 												importArray[1].length() - 1);
-								if (classToImport.contains(".")) {
-									try {
-										bcu.createImport(classToImport, null,
-												null);
-									} catch (JavaModelException e) {
-										e.printStackTrace();
-									}
+								if (classToImport.contains(",")) {
+									// import two generic classes of map
+									String[] clazz = classToImport.split(",");
+									importGenericClasses(bcu, clazz[0]);
+									importGenericClasses(bcu, clazz[1]);
+								} else {
+									// import one generic classes of collection
+									importGenericClasses(bcu, classToImport);
 								}
+
 							} else {
-								if (completeFieldtype.contains(".")) {
-									try {
-										bcu.createImport(completeFieldtype,
-												null, null);
-									} catch (JavaModelException e) {
-										e.printStackTrace();
-									}
+								// import base class
+								importGenericClasses(bcu, completeFieldtype);
+								if (completeFieldtype
+										.equals("java.lang.String")) {
+									assignableFields
+											.put(fieldName, Type.STRING);
+								} else if (completeFieldtype
+										.equals("java.lang.Integer")) {
+									assignableFields.put(fieldName, Type.INT);
+								} else if (completeFieldtype
+										.equals("java.lang.Long")) {
+									assignableFields.put(fieldName, Type.LONG);
+								} else if (completeFieldtype
+										.equals("java.lang.Double")) {
+									assignableFields
+											.put(fieldName, Type.DOUBLE);
+								} else if (completeFieldtype
+										.equals("java.lang.Float")) {
+									assignableFields.put(fieldName, Type.FLOAT);
+								} else if (completeFieldtype
+										.equals("java.lang.Character")) {
+									assignableFields.put(fieldName, Type.CHAR);
+								} else if (completeFieldtype
+										.equals("java.lang.Boolean")) {
+									assignableFields.put(fieldName,
+											Type.BOOLEAN);
 								}
 							}
 
@@ -209,7 +267,30 @@ public class SampleHandler extends AbstractHandler {
 										string.length() - 1);
 							}
 
+						}else{
+							
+							String primitiveType = field.getType().toString();
+							
+							if(primitiveType.equals(PrimitiveType.INT.toString())){
+								assignableFields.put(fieldName, Type.INT);
+							}else if (primitiveType.equals(PrimitiveType.LONG.toString())) {
+								assignableFields.put(fieldName, Type.LONG);
+							} else if (primitiveType.equals(PrimitiveType.DOUBLE.toString())) {
+								assignableFields
+										.put(fieldName, Type.DOUBLE);
+							} else if (primitiveType.equals(PrimitiveType.FLOAT.toString())) {
+								assignableFields.put(fieldName, Type.FLOAT);
+							} else if (primitiveType.equals(PrimitiveType.CHAR.toString())) {
+								assignableFields.put(fieldName, Type.CHAR);
+							} else if (primitiveType.equals(PrimitiveType.BOOLEAN.toString())) {
+								assignableFields.put(fieldName,
+										Type.BOOLEAN);
+							}
+							
+							
+							
 						}
+						
 						String methodBody = "";
 						Class clazz = null;
 						try {
@@ -221,21 +302,42 @@ public class SampleHandler extends AbstractHandler {
 								&& fieldPackage.startsWith("java.util")
 								&& Collection.class.isAssignableFrom(clazz)) {
 							methodBody = reverseCapitalize(nameWithoutExtension)
-									+ ".get" + capitalize(fieldName)
-									+ "().add(" + reverseCapitalize(fieldName)
+									+ ".get"
+									+ capitalize(fieldName)
+									+ "().add("
+									+ reverseCapitalize(fieldName)
 									+ ");";
+						} else if (fieldPackage != null
+								&& fieldPackage.startsWith("java.util")
+								&& Map.class.isAssignableFrom(clazz)) {
+							methodBody = reverseCapitalize(nameWithoutExtension)
+									+ ".get"
+									+ capitalize(fieldName)
+									+ "().put(key,value);";
 						} else {
 							methodBody = reverseCapitalize(nameWithoutExtension)
-									+ ".set" + capitalize(fieldName) + "("
+									+ ".set"
+									+ capitalize(fieldName)
+									+ "("
 									+ reverseCapitalize(fieldName) + ");";
 						}
 
 						try {
-							type.createMethod("public " + builderClass + " "
-									+ fieldName + "(" + fieldType + " "
-									+ reverseCapitalize(fieldName) + "){"
-									+ methodBody + "return this;" + "}", null,
-									true, null);
+							if (fieldType.contains(",")) {
+								// for Map and sub classes
+								String[] fieldTypes = fieldType.split(",");
+								type.createMethod("public " + builderClass
+										+ " " + fieldName + "(" + fieldTypes[0]
+										+ " key," + fieldTypes[1] + " value){"
+										+ methodBody + "return this;" + "}",
+										null, true, null);
+							} else {
+								type.createMethod("public " + builderClass
+										+ " " + fieldName + "(" + fieldType
+										+ " " + reverseCapitalize(fieldName)
+										+ "){" + methodBody + "return this;"
+										+ "}", null, true, null);
+							}
 						} catch (JavaModelException e) {
 							e.printStackTrace();
 						}
@@ -247,14 +349,15 @@ public class SampleHandler extends AbstractHandler {
 		}
 
 		try {
-			type.createMethod(
-					"public " + nameWithoutExtension + " build(){return this."
-							+ reverseCapitalize(nameWithoutExtension) + ";}", null,
+			type.createMethod("public " + nameWithoutExtension
+					+ " build(){return this."
+					+ reverseCapitalize(nameWithoutExtension) + ";}", null,
 					true, null);
 
 			type.createMethod("public static " + nameWithoutExtension + " any"
 					+ nameWithoutExtension + "(){\n//TODO\n"
-					+ "return newInstance().build();}", null, true, null);
+					+ "return newInstance()" + generateFactoryMethodBody()
+					+ ".build();}", null, true, null);
 		} catch (JavaModelException e1) {
 			e1.printStackTrace();
 		}
@@ -273,13 +376,54 @@ public class SampleHandler extends AbstractHandler {
 		}
 	}
 
+	private void importGenericClasses(ICompilationUnit bcu, String classToImport) {
+		if (classToImport.contains(".")) {
+			try {
+				bcu.createImport(classToImport, null, null);
+			} catch (JavaModelException e) {
+				e.printStackTrace();
+			}
+		}
+	}
+
 	public String capitalize(String s) {
 		return s.replaceFirst(String.valueOf(s.charAt(0)),
 				String.valueOf(s.charAt(0)).toUpperCase());
 	}
-	
+
 	public String reverseCapitalize(String s) {
 		return s.replaceFirst(String.valueOf(s.charAt(0)),
 				String.valueOf(s.charAt(0)).toLowerCase());
+	}
+
+	private String generateFactoryMethodBody() {
+		StringBuilder factoryMethodBody = new StringBuilder();
+		Set<String> keySet = assignableFields.keySet();
+		for (String key : keySet) {
+			if (assignableFields.get(key) == Type.STRING) {
+				factoryMethodBody.append(".").append(key).append("(\"")
+						.append(key).append("\")");
+			} else if (assignableFields.get(key) == Type.INT) {
+				factoryMethodBody.append(".").append(key).append("(")
+						.append( (int)(Math.random()*10)).append(")");
+			} else if (assignableFields.get(key) == Type.LONG) {
+				factoryMethodBody.append(".").append(key).append("(")
+						.append((int)(Math.random()*10)).append("l)");
+			} else if (assignableFields.get(key) == Type.FLOAT) {
+				factoryMethodBody.append(".").append(key).append("(")
+						.append((int)(Math.random()*10)+.5).append("f)");
+			} else if (assignableFields.get(key) == Type.DOUBLE) {
+				factoryMethodBody.append(".").append(key).append("(")
+						.append((int)(Math.random()*10)+.5).append(")");
+			} else if (assignableFields.get(key) == Type.CHAR) {
+				factoryMethodBody.append(".").append(key).append("('")
+						.append('a').append("')");
+			} else if (assignableFields.get(key) == Type.BOOLEAN) {
+				factoryMethodBody.append(".").append(key).append("(true")
+						.append(")");
+			} 
+		}
+
+		return factoryMethodBody.toString();
 	}
 }
