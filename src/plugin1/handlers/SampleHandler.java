@@ -30,12 +30,14 @@ import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.FieldDeclaration;
+import org.eclipse.jdt.core.dom.Modifier;
 import org.eclipse.jdt.core.dom.PrimitiveType;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 import org.eclipse.jdt.core.formatter.CodeFormatter;
 import org.eclipse.jdt.core.search.IJavaSearchConstants;
 import org.eclipse.jdt.core.search.IJavaSearchScope;
 import org.eclipse.jdt.core.search.SearchEngine;
+import org.eclipse.jdt.internal.corext.util.CollectionsUtil;
 import org.eclipse.jdt.internal.ui.dialogs.FilteredTypesSelectionDialog;
 import org.eclipse.jdt.ui.JavaUI;
 import org.eclipse.text.edits.TextEdit;
@@ -248,6 +250,10 @@ public class SampleHandler extends AbstractHandler {
 				for (BodyDeclaration body : bodies) {
 					if (body.getNodeType() == ASTNode.FIELD_DECLARATION) {
 						FieldDeclaration field = (FieldDeclaration) body;
+						if(listContainsModifier(field.modifiers(),Modifier.STATIC)){
+							//skip static fields
+							continue;
+						}
 						Object o = field.fragments().get(0);
 						String fieldName = ((VariableDeclarationFragment) o)
 								.getName().toString();
@@ -508,5 +514,14 @@ public class SampleHandler extends AbstractHandler {
 		}
 
 		return factoryMethodBody.toString();
+	}
+	public static boolean  listContainsModifier(List<Modifier> modifierList,int mod){
+		boolean contains=false;
+		for (Modifier modifier : modifierList) {
+			if(modifier.getKeyword().toFlagValue()==mod){
+				contains=true;
+			}
+		}
+		return contains;
 	}
 }
